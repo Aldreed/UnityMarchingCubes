@@ -1,0 +1,145 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Main
+
+
+RWTexture2D<float4> Result;
+
+struct GridPoint
+{
+    float3 location;
+    float value;
+};
+
+struct Triangle
+{
+    float3 a;
+    float3 b;
+    float3 c;
+};
+
+RWStructuredBuffer<Triangle> _GenTris;
+RWStructuredBuffer<GridPoint> points;
+RWStructuredBuffer<int> edgeTable;
+RWStructuredBuffer<int> triTable;
+uint NumOfPoints;
+RWStructuredBuffer<int> createdTris;
+
+float3 VertexInterp(double isolevel, float3 p1, float3 p2, double valp1, double valp2)
+{
+    double mu;
+    float3 p;
+
+    if (abs(isolevel - valp1) < 0.00001)
+        return (p1);
+    if (abs(isolevel - valp2) < 0.00001)
+        return (p2);
+    if (abs(valp1 - valp2) < 0.00001)
+        return (p1);
+    mu = (isolevel - valp1) / (valp2 - valp1);
+    p.x = (float) (p1.x + mu * (p2.x - p1.x));
+    p.y = (float) (p1.y + mu * (p2.y - p1.y));
+    p.z = (float) (p1.z + mu * (p2.z - p1.z));
+
+    return (p);
+}
+int Polygonise(int id, double isolevel, int currCount)
+{
+    int i,ntriang;
+    int cubeindex;
+    float3 vertlist[12];
+    
+    
+    
+    GridPoint a = points[id * 8];
+    GridPoint b = points[id * 8 + 1];
+    GridPoint c = points[id * 8 + 2];
+    GridPoint d = points[id * 8 + 3];
+    GridPoint e = points[id * 8 + 4];
+    GridPoint f = points[id * 8 + 5];
+    GridPoint g = points[id * 8 + 6];
+    GridPoint h = points[id * 8 + 7];
+    
+    
+        cubeindex = 0;
+        if (a.value < isolevel) cubeindex |= 1;
+        if (b.value < isolevel) cubeindex |= 2;
+        if (c.value < isolevel) cubeindex |= 4;
+        if (d.value < isolevel) cubeindex |= 8;
+        if (e.value < isolevel) cubeindex |= 16;
+        if (f.value < isolevel) cubeindex |= 32;
+        if (g.value < isolevel) cubeindex |= 64;
+        if (h.value < isolevel) cubeindex |= 128;
+
+        /* Cube is entirely in/out of the surface */
+        if (edgeTable[cubeindex] == 0)
+            return (0);
+
+        /* Find the vertices where the surface intersects the cube */
+        if ((edgeTable[cubeindex] & 1) != 0)
+            vertlist[0] =
+               VertexInterp(isolevel, a.location, b.location, a.value, b.value);
+        if ((edgeTable[cubeindex] & 2) != 0)
+            vertlist[1] =
+               VertexInterp(isolevel, b.location, c.location, b.value, c.value);
+        if ((edgeTable[cubeindex] & 4) != 0)
+            vertlist[2] =
+               VertexInterp(isolevel, c.location, d.location, c.value, d.value);
+        if ((edgeTable[cubeindex] & 8) != 0)
+            vertlist[3] =
+               VertexInterp(isolevel, d.location, a.location, d.value, a.value);
+        if ((edgeTable[cubeindex] & 16) != 0)
+            vertlist[4] =
+               VertexInterp(isolevel, e.location, f.location, e.value, f.value);
+        if ((edgeTable[cubeindex] & 32) != 0)
+            vertlist[5] =
+               VertexInterp(isolevel, f.location, g.location, f.value, g.value);
+        if ((edgeTable[cubeindex] & 64) != 0)
+            vertlist[6] =
+               VertexInterp(isolevel, g.location, h.location, g.value, h.value);
+        if ((edgeTable[cubeindex] & 128) != 0)
+            vertlist[7] =
+               VertexInterp(isolevel, h.location, e.location, h.value, e.value);
+        if ((edgeTable[cubeindex] & 256) != 0)
+            vertlist[8] =
+               VertexInterp(isolevel, a.location, e.location, a.value, e.value);
+        if ((edgeTable[cubeindex] & 512) != 0)
+            vertlist[9] =
+               VertexInterp(isolevel, b.location, f.location, b.value, f.value);
+        if ((edgeTable[cubeindex] & 1024) != 0)
+            vertlist[10] =
+               VertexInterp(isolevel, c.location, g.location, c.value, g.value);
+        if ((edgeTable[cubeindex] & 2048) != 0)
+            vertlist[11] =
+               VertexInterp(isolevel, d.location, h.location, d.value, h.value);
+
+        /* Create the triangle */
+        ntriang = 0;
+        for (i = 0; triTable[cubeindex*16 + i] != -1; i += 3)
+        {
+            Triangle n;
+            n.a = vertlist[triTable[cubeindex*16 + i]];
+            n.b = vertlist[triTable[cubeindex*16 + i + 1]];
+            n.c = vertlist[triTable[cubeindex*16 + i + 2]];
+        _GenTris[ntriang + currCount] = n;
+            ntriang++;
+            
+        }
+
+        return (ntriang);
+    }
+
+
+[numthreads(128,1,1)]
+void Main (uint3 id : SV_DispatchThreadID)
+{
+    if ((id.x*8)  >= NumOfPoints)
+    {
+        return;
+    }
+
+    int temp = Polygonise(id.x, 1, createdTris[0]);
+    
+    createdTris[0] = createdTris[0] + temp;
+    //createdTris[0]++;
+    
+}
